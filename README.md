@@ -15,6 +15,7 @@ This repository now includes:
 3. PostgreSQL schema migrations (`migrations/0001_init.sql`, `migrations/0002_runtime_state.sql`).
 4. OpenAI OAuth authorization-code exchange + refresh flow.
 5. Encrypted token-at-rest storage for provider access/refresh tokens (AES-GCM).
+6. Real MT5 EA polling/execution implementation (`ea/MMBotEA.mq5`).
 4. Risk engine with hard safety rules and unit tests.
 5. Telegram notifier integration.
 6. OpenClaw outbound webhook publisher.
@@ -93,6 +94,27 @@ The migration SQL is mounted to `docker-entrypoint-initdb.d` and auto-applies on
 ```bash
 go run ./cmd/server
 ```
+
+## MT5 EA (Real Loop)
+
+Compile and attach:
+1. Open MetaEditor.
+2. Open [MMBotEA.mq5](C:/Users/nbzkr/OneDrive/Documents/Coding/MMBot/ea/MMBotEA.mq5).
+3. Compile to `.ex5`.
+4. Attach EA to a chart in MT5.
+
+Required MT5 setting:
+1. In MT5, go to `Tools -> Options -> Expert Advisors`.
+2. Enable `Allow WebRequest for listed URL`.
+3. Add your backend base URL (example: `http://127.0.0.1:8080`).
+
+EA behavior:
+1. Registers with `/ea/register` using connect code.
+2. Sends `/ea/heartbeat`.
+3. Sends `/ea/sync` snapshots with positions + PnL metrics.
+4. Polls `/ea/execute`.
+5. Executes command types (`OPEN`, `CLOSE`, `MOVE_SL`, `SET_TP`, `PAUSE`, `RESUME`).
+6. Reliably reports `/ea/result` with pending retry on network failures.
 
 ## Quick Manual Flow
 

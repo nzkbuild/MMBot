@@ -1,6 +1,6 @@
 // MMBotEA.example.mq5
-// Example skeleton for MT5 polling flow.
-// This file is intentionally minimal and requires adaptation per broker/environment.
+// Legacy placeholder skeleton.
+// Use ea/MMBotEA.mq5 for the real implementation.
 
 #property strict
 
@@ -46,4 +46,3 @@ void PollExecute() {
    // If command type is OPEN/CLOSE/MOVE_SL/SET_TP, execute order operations via MQL5 trade API.
    // Then POST /ea/result with SUCCESS/FAIL payload.
 }
-
