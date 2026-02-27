@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -42,6 +44,18 @@ type Server struct {
 	openAIOAuth          *oauth.OpenAIClient
 	trendEngine          *strategy.TrendEngine
 	allowedTelegramChats map[string]bool
+	strategyUsageMu      sync.Mutex
+	strategyUsage        map[string]*strategyUsageState
+}
+
+type strategyUsageState struct {
+	MinuteWindowStart time.Time
+	MinuteCount       int
+	DayKey            string
+	DayCount          int
+	LastRunAt         time.Time
+	LastFingerprint   string
+	LastFingerprintAt time.Time
 }
 
 func NewServer(
@@ -74,6 +88,7 @@ func NewServer(
 		},
 		trendEngine:          strategy.NewTrendEngine(),
 		allowedTelegramChats: allowedChats,
+		strategyUsage:        make(map[string]*strategyUsageState),
 	}
 }
 
@@ -425,7 +440,7 @@ func (s *Server) handleEvaluateSignal(w http.ResponseWriter, r *http.Request) {
 	if input.AccountID == "" {
 		input.AccountID = "paper-1"
 	}
-	result := s.evaluateAndQueue(r.Context(), input)
+	result := s.evaluateAndQueue(r.Context(), input, fingerprintSignalInput(input))
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -442,6 +457,10 @@ func (s *Server) handleTrendEvaluate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AccountID == "" {
 		req.AccountID = "paper-1"
+	}
+	if s.cfg.StrategyMaxCandles > 0 && len(req.Candles) > s.cfg.StrategyMaxCandles {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("too many candles: max %d", s.cfg.StrategyMaxCandles))
+		return
 	}
 
 	sig, err := s.trendEngine.Evaluate(strategy.TrendInput{
@@ -471,13 +490,26 @@ func (s *Server) handleTrendEvaluate(w http.ResponseWriter, r *http.Request) {
 		StopLossPips:   sig.StopLossPips,
 		TakeProfitPips: sig.TakeProfitPips,
 	}
-	result := s.evaluateAndQueue(r.Context(), input)
+	result := s.evaluateAndQueue(r.Context(), input, fingerprintTrendRequest(req.AccountID, req.Symbol, req.SpreadPips, req.Candles))
 	result["has_signal"] = true
 	result["strategy_signal"] = sig
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) evaluateAndQueue(ctx context.Context, input domain.SignalInput) map[string]interface{} {
+func (s *Server) evaluateAndQueue(ctx context.Context, input domain.SignalInput, fingerprint string) map[string]interface{} {
+	if denied, reason := s.enforceStrategyRunPolicy(input.AccountID, fingerprint, time.Now().UTC()); denied {
+		s.emitEvent(domain.EventRiskTriggered, input.AccountID, map[string]interface{}{
+			"reason": reason,
+			"symbol": input.Symbol,
+			"side":   input.Side,
+			"source": "usage_guard",
+		})
+		return map[string]interface{}{
+			"allowed":     false,
+			"deny_reason": reason,
+		}
+	}
+
 	if !s.openAIConnected(ctx) {
 		decision := domain.RiskDecision{Allowed: false, DenyReason: "provider_unavailable_fail_closed"}
 		s.emitEvent(domain.EventRiskTriggered, input.AccountID, map[string]interface{}{
@@ -724,6 +756,119 @@ func (s *Server) openAIConnected(ctx context.Context) bool {
 	conn, connected := s.store.GetOpenAIConnection()
 	conn, connected = s.ensureFreshOpenAIConnection(ctx, conn, connected)
 	return connected && conn.ExpiresAt.After(time.Now().UTC())
+}
+
+func (s *Server) enforceStrategyRunPolicy(accountID, fingerprint string, now time.Time) (bool, string) {
+	limitPerMin := s.cfg.StrategyRateLimitPerMin
+	if limitPerMin <= 0 {
+		limitPerMin = 30
+	}
+	minInterval := s.cfg.StrategyMinInterval
+	if minInterval < 0 {
+		minInterval = 0
+	}
+	dedupTTL := s.cfg.StrategyDedupTTL
+	if dedupTTL < 0 {
+		dedupTTL = 0
+	}
+	dailyBudget := s.cfg.StrategyDailyBudget
+	if dailyBudget <= 0 {
+		dailyBudget = 500
+	}
+
+	key := strings.TrimSpace(accountID)
+	if key == "" {
+		key = "paper-1"
+	}
+
+	s.strategyUsageMu.Lock()
+	defer s.strategyUsageMu.Unlock()
+
+	u, ok := s.strategyUsage[key]
+	if !ok {
+		u = &strategyUsageState{}
+		s.strategyUsage[key] = u
+	}
+
+	if u.MinuteWindowStart.IsZero() || now.Sub(u.MinuteWindowStart) >= time.Minute {
+		u.MinuteWindowStart = now
+		u.MinuteCount = 0
+	}
+	if u.MinuteCount >= limitPerMin {
+		return true, "strategy_rate_limit_exceeded"
+	}
+	u.MinuteCount++
+
+	dayKey := now.Format("2006-01-02")
+	if u.DayKey != dayKey {
+		u.DayKey = dayKey
+		u.DayCount = 0
+	}
+	if u.DayCount >= dailyBudget {
+		return true, "strategy_daily_budget_exceeded"
+	}
+
+	if !u.LastRunAt.IsZero() && now.Sub(u.LastRunAt) < minInterval {
+		return true, "strategy_cooldown_active"
+	}
+	if fingerprint != "" && u.LastFingerprint == fingerprint && !u.LastFingerprintAt.IsZero() && now.Sub(u.LastFingerprintAt) < dedupTTL {
+		return true, "strategy_duplicate_request"
+	}
+
+	u.DayCount++
+	u.LastRunAt = now
+	u.LastFingerprint = fingerprint
+	u.LastFingerprintAt = now
+	return false, ""
+}
+
+func fingerprintSignalInput(input domain.SignalInput) string {
+	payload := map[string]interface{}{
+		"account_id":       strings.TrimSpace(input.AccountID),
+		"symbol":           strings.ToUpper(strings.TrimSpace(input.Symbol)),
+		"side":             strings.ToUpper(strings.TrimSpace(input.Side)),
+		"spread_pips":      input.SpreadPips,
+		"stop_loss_pips":   input.StopLossPips,
+		"take_profit_pips": input.TakeProfitPips,
+	}
+	return hashPayload(payload)
+}
+
+func fingerprintTrendRequest(accountID, symbol string, spreadPips float64, candles []strategy.Candle) string {
+	type compactCandle struct {
+		T string  `json:"t"`
+		O float64 `json:"o"`
+		H float64 `json:"h"`
+		L float64 `json:"l"`
+		C float64 `json:"c"`
+	}
+	compact := make([]compactCandle, 0, len(candles))
+	for _, c := range candles {
+		compact = append(compact, compactCandle{
+			T: c.Time.UTC().Format(time.RFC3339),
+			O: c.Open,
+			H: c.High,
+			L: c.Low,
+			C: c.Close,
+		})
+	}
+	payload := map[string]interface{}{
+		"account_id":  strings.TrimSpace(accountID),
+		"symbol":      strings.ToUpper(strings.TrimSpace(symbol)),
+		"spread_pips": spreadPips,
+		"candles":     compact,
+	}
+	return hashPayload(payload)
+}
+
+func hashPayload(payload interface{}) string {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	h := fnv.New64a()
+	_, _ = h.Write(raw)
+	return fmt.Sprintf("%x", h.Sum64())
 }
 
 func (s *Server) calculateVolume() float64 {

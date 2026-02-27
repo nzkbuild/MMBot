@@ -13,6 +13,12 @@ Validate MMBot end-to-end in paper mode and provide incident-response steps for 
    - optional: OAuth client settings + callback flow.
 4. Backend started (`go run ./cmd/server`).
 5. MT5 terminal configured with `WebRequest` allowlist including backend URL.
+6. Strategy guardrails tuned for your account usage pattern:
+   - `STRATEGY_RATE_LIMIT_PER_MIN`
+   - `STRATEGY_MIN_INTERVAL`
+   - `STRATEGY_DEDUP_TTL`
+   - `STRATEGY_DAILY_BUDGET`
+   - `STRATEGY_MAX_CANDLES`
 
 ## Automated Validation
 

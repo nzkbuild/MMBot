@@ -269,6 +269,226 @@ func TestE2E_SyncDailyLossCircuitBreaker(t *testing.T) {
 	}
 }
 
+func TestE2E_StrategyGuard_DuplicateRequest(t *testing.T) {
+	cfg := config.Config{
+		AdminUsername:           "admin",
+		AdminPassword:           "pw",
+		JWTSecret:               "jwt-secret",
+		EAConnectCode:           "MMBOT-ONE-TIME-CODE",
+		EATokenTTL:              24 * time.Hour,
+		AIMinConfidence:         0.70,
+		MaxDailyLossPct:         2.0,
+		MaxOpenPositions:        3,
+		MaxSpreadPips:           2.0,
+		OpenAIAPIKey:            "sk-test",
+		OpenClawTimeout:         1 * time.Second,
+		StrategyRateLimitPerMin: 100,
+		StrategyMinInterval:     0,
+		StrategyDedupTTL:        5 * time.Minute,
+		StrategyDailyBudget:     100,
+		StrategyMaxCandles:      300,
+	}
+	store := memory.NewStore(24 * time.Hour)
+	srv := NewServer(
+		cfg,
+		store,
+		risk.NewEngine(cfg.MaxOpenPositions, cfg.MaxDailyLossPct, cfg.AIMinConfidence, cfg.MaxSpreadPips),
+		telegram.NewNotifier("", ""),
+		openclaw.NewClient("", time.Second, 0, 100*time.Millisecond, time.Second),
+	)
+	api := httptest.NewServer(srv.Router())
+	defer api.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	adminLoginResp := postJSON(t, client, api.URL+"/admin/login", map[string]string{
+		"username": "admin",
+		"password": "pw",
+	}, "")
+	adminToken := strField(t, adminLoginResp, "token")
+
+	payload := map[string]interface{}{
+		"account_id":  "paper-1",
+		"symbol":      "EURUSD",
+		"spread_pips": 1.0,
+		"candles":     uptrendCandles(120),
+	}
+	first := postJSON(t, client, api.URL+"/admin/strategy/evaluate", payload, adminToken)
+	if !boolField(first, "allowed") {
+		t.Fatalf("expected first request allowed, got %#v", first)
+	}
+	second := postJSON(t, client, api.URL+"/admin/strategy/evaluate", payload, adminToken)
+	if boolField(second, "allowed") || strField(t, second, "deny_reason") != "strategy_duplicate_request" {
+		t.Fatalf("expected strategy_duplicate_request, got %#v", second)
+	}
+}
+
+func TestE2E_StrategyGuard_RateLimit(t *testing.T) {
+	cfg := config.Config{
+		AdminUsername:           "admin",
+		AdminPassword:           "pw",
+		JWTSecret:               "jwt-secret",
+		EAConnectCode:           "MMBOT-ONE-TIME-CODE",
+		EATokenTTL:              24 * time.Hour,
+		AIMinConfidence:         0.70,
+		MaxDailyLossPct:         2.0,
+		MaxOpenPositions:        3,
+		MaxSpreadPips:           2.0,
+		OpenAIAPIKey:            "sk-test",
+		OpenClawTimeout:         1 * time.Second,
+		StrategyRateLimitPerMin: 1,
+		StrategyMinInterval:     0,
+		StrategyDedupTTL:        0,
+		StrategyDailyBudget:     1,
+		StrategyMaxCandles:      300,
+	}
+	store := memory.NewStore(24 * time.Hour)
+	srv := NewServer(
+		cfg,
+		store,
+		risk.NewEngine(cfg.MaxOpenPositions, cfg.MaxDailyLossPct, cfg.AIMinConfidence, cfg.MaxSpreadPips),
+		telegram.NewNotifier("", ""),
+		openclaw.NewClient("", time.Second, 0, 100*time.Millisecond, time.Second),
+	)
+	api := httptest.NewServer(srv.Router())
+	defer api.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	adminLoginResp := postJSON(t, client, api.URL+"/admin/login", map[string]string{
+		"username": "admin",
+		"password": "pw",
+	}, "")
+	adminToken := strField(t, adminLoginResp, "token")
+
+	first := postJSON(t, client, api.URL+"/admin/strategy/evaluate", map[string]interface{}{
+		"account_id":  "paper-1",
+		"symbol":      "EURUSD",
+		"spread_pips": 1.0,
+		"candles":     uptrendCandles(120),
+	}, adminToken)
+	if !boolField(first, "allowed") {
+		t.Fatalf("expected first request allowed, got %#v", first)
+	}
+
+	second := postJSON(t, client, api.URL+"/admin/strategy/evaluate", map[string]interface{}{
+		"account_id":  "paper-1",
+		"symbol":      "GBPUSD",
+		"spread_pips": 1.0,
+		"candles":     uptrendCandles(120),
+	}, adminToken)
+	if boolField(second, "allowed") || strField(t, second, "deny_reason") != "strategy_rate_limit_exceeded" {
+		t.Fatalf("expected strategy_rate_limit_exceeded, got %#v", second)
+	}
+}
+
+func TestE2E_StrategyGuard_DailyBudget(t *testing.T) {
+	cfg := config.Config{
+		AdminUsername:           "admin",
+		AdminPassword:           "pw",
+		JWTSecret:               "jwt-secret",
+		EAConnectCode:           "MMBOT-ONE-TIME-CODE",
+		EATokenTTL:              24 * time.Hour,
+		AIMinConfidence:         0.70,
+		MaxDailyLossPct:         2.0,
+		MaxOpenPositions:        3,
+		MaxSpreadPips:           2.0,
+		OpenAIAPIKey:            "sk-test",
+		OpenClawTimeout:         1 * time.Second,
+		StrategyRateLimitPerMin: 100,
+		StrategyMinInterval:     0,
+		StrategyDedupTTL:        0,
+		StrategyDailyBudget:     1,
+		StrategyMaxCandles:      300,
+	}
+	store := memory.NewStore(24 * time.Hour)
+	srv := NewServer(
+		cfg,
+		store,
+		risk.NewEngine(cfg.MaxOpenPositions, cfg.MaxDailyLossPct, cfg.AIMinConfidence, cfg.MaxSpreadPips),
+		telegram.NewNotifier("", ""),
+		openclaw.NewClient("", time.Second, 0, 100*time.Millisecond, time.Second),
+	)
+	api := httptest.NewServer(srv.Router())
+	defer api.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	adminLoginResp := postJSON(t, client, api.URL+"/admin/login", map[string]string{
+		"username": "admin",
+		"password": "pw",
+	}, "")
+	adminToken := strField(t, adminLoginResp, "token")
+
+	first := postJSON(t, client, api.URL+"/admin/strategy/evaluate", map[string]interface{}{
+		"account_id":  "paper-1",
+		"symbol":      "EURUSD",
+		"spread_pips": 1.0,
+		"candles":     uptrendCandles(120),
+	}, adminToken)
+	if !boolField(first, "allowed") {
+		t.Fatalf("expected first request allowed, got %#v", first)
+	}
+
+	second := postJSON(t, client, api.URL+"/admin/strategy/evaluate", map[string]interface{}{
+		"account_id":  "paper-1",
+		"symbol":      "USDCHF",
+		"spread_pips": 1.0,
+		"candles":     uptrendCandles(120),
+	}, adminToken)
+	if boolField(second, "allowed") || strField(t, second, "deny_reason") != "strategy_daily_budget_exceeded" {
+		t.Fatalf("expected strategy_daily_budget_exceeded, got %#v", second)
+	}
+}
+
+func TestE2E_StrategyGuard_MaxCandles(t *testing.T) {
+	cfg := config.Config{
+		AdminUsername:           "admin",
+		AdminPassword:           "pw",
+		JWTSecret:               "jwt-secret",
+		EAConnectCode:           "MMBOT-ONE-TIME-CODE",
+		EATokenTTL:              24 * time.Hour,
+		AIMinConfidence:         0.70,
+		MaxDailyLossPct:         2.0,
+		MaxOpenPositions:        3,
+		MaxSpreadPips:           2.0,
+		OpenAIAPIKey:            "sk-test",
+		OpenClawTimeout:         1 * time.Second,
+		StrategyRateLimitPerMin: 100,
+		StrategyMinInterval:     0,
+		StrategyDedupTTL:        0,
+		StrategyDailyBudget:     100,
+		StrategyMaxCandles:      10,
+	}
+	store := memory.NewStore(24 * time.Hour)
+	srv := NewServer(
+		cfg,
+		store,
+		risk.NewEngine(cfg.MaxOpenPositions, cfg.MaxDailyLossPct, cfg.AIMinConfidence, cfg.MaxSpreadPips),
+		telegram.NewNotifier("", ""),
+		openclaw.NewClient("", time.Second, 0, 100*time.Millisecond, time.Second),
+	)
+	api := httptest.NewServer(srv.Router())
+	defer api.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	adminLoginResp := postJSON(t, client, api.URL+"/admin/login", map[string]string{
+		"username": "admin",
+		"password": "pw",
+	}, "")
+	adminToken := strField(t, adminLoginResp, "token")
+
+	status, body := postJSONStatus(t, client, api.URL+"/admin/strategy/evaluate", map[string]interface{}{
+		"account_id":  "paper-1",
+		"symbol":      "EURUSD",
+		"spread_pips": 1.0,
+		"candles":     uptrendCandles(11),
+	}, adminToken)
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected 400 for max candles, got %d body=%#v", status, body)
+	}
+	if strField(t, body, "error") == "" {
+		t.Fatalf("expected error message for max candles, got %#v", body)
+	}
+}
+
 func uptrendCandles(n int) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, n)
 	base := 1.0800
@@ -323,6 +543,30 @@ func postJSON(t *testing.T, client *http.Client, url string, body interface{}, b
 		t.Fatalf("decode response: %v", err)
 	}
 	return out
+}
+
+func postJSONStatus(t *testing.T, client *http.Client, url string, body interface{}, bearerToken string) (int, map[string]interface{}) {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+	var out map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
 }
 
 func getJSON(t *testing.T, client *http.Client, url string, bearerToken string) map[string]interface{} {

@@ -64,6 +64,7 @@ The risk engine blocks new opens when:
 4. AI confidence is below threshold.
 5. Max open positions is reached.
 6. Daily loss limit is reached.
+7. Strategy usage guardrails trigger (`strategy_rate_limit_exceeded`, `strategy_cooldown_active`, `strategy_duplicate_request`, `strategy_daily_budget_exceeded`).
 
 ## Local Configuration
 
@@ -79,6 +80,7 @@ Important variables:
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `JWT_SECRET`
 - `EA_CONNECT_CODE`, `EA_TOKEN_TTL`
 - `AI_MIN_CONFIDENCE`, `MAX_DAILY_LOSS_PCT`, `MAX_OPEN_POSITIONS`, `MAX_SPREAD_PIPS`
+- `STRATEGY_RATE_LIMIT_PER_MIN`, `STRATEGY_MIN_INTERVAL`, `STRATEGY_DEDUP_TTL`, `STRATEGY_DAILY_BUDGET`, `STRATEGY_MAX_CANDLES`
 - `OPENAI_API_KEY` (recommended)
 - `OPENAI_CLIENT_ID`, `OPENAI_CLIENT_SECRET`, `OPENAI_AUTH_URL`, `OPENAI_TOKEN_URL`, `OPENAI_SCOPES`, `OPENAI_REDIRECT_URI`, `OPENAI_REFRESH_SKEW` (optional OAuth mode)
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
