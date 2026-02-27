@@ -16,6 +16,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"mmbot/internal/domain"
+	"mmbot/internal/security/secretbox"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -23,12 +24,17 @@ var ErrNotFound = errors.New("not found")
 type Store struct {
 	db       *sql.DB
 	tokenTTL time.Duration
+	box      *secretbox.Box
 
 	mu          sync.Mutex
 	openAIState map[string]domain.OAuthState
 }
 
-func NewStore(databaseURL string, tokenTTL time.Duration) (*Store, error) {
+func NewStore(databaseURL string, tokenTTL time.Duration, encryptionKey string) (*Store, error) {
+	box, err := secretbox.New(encryptionKey)
+	if err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
@@ -41,6 +47,7 @@ func NewStore(databaseURL string, tokenTTL time.Duration) (*Store, error) {
 	return &Store{
 		db:          db,
 		tokenTTL:    tokenTTL,
+		box:         box,
 		openAIState: make(map[string]domain.OAuthState),
 	}, nil
 }
@@ -395,6 +402,17 @@ func (s *Store) ConsumeOAuthState(state string) (domain.OAuthState, error) {
 }
 
 func (s *Store) SaveOpenAIConnection(conn domain.ProviderConnection) {
+	accessTokenEnc, err := s.box.Encrypt(conn.AccessToken)
+	if err != nil {
+		return
+	}
+	refreshTokenEnc := ""
+	if conn.RefreshToken != "" {
+		refreshTokenEnc, err = s.box.Encrypt(conn.RefreshToken)
+		if err != nil {
+			return
+		}
+	}
 	_, _ = s.db.Exec(
 		`insert into oauth_provider_connections(provider, access_token_enc, refresh_token_enc, scopes, expires_at, connected_at)
 		 values ($1, $2, $3, $4, $5, $6)
@@ -405,8 +423,8 @@ func (s *Store) SaveOpenAIConnection(conn domain.ProviderConnection) {
 		     expires_at = excluded.expires_at,
 		     connected_at = excluded.connected_at`,
 		conn.Provider,
-		conn.AccessToken,
-		conn.RefreshToken,
+		accessTokenEnc,
+		refreshTokenEnc,
 		pq.Array(conn.Scopes),
 		conn.ExpiresAt,
 		conn.ConnectedAt,
@@ -431,6 +449,18 @@ func (s *Store) GetOpenAIConnection() (domain.ProviderConnection, bool) {
 	)
 	if err != nil {
 		return domain.ProviderConnection{}, false
+	}
+	accessToken, err := s.box.Decrypt(conn.AccessToken)
+	if err != nil {
+		return domain.ProviderConnection{}, false
+	}
+	conn.AccessToken = accessToken
+	if conn.RefreshToken != "" {
+		refreshToken, err := s.box.Decrypt(conn.RefreshToken)
+		if err != nil {
+			return domain.ProviderConnection{}, false
+		}
+		conn.RefreshToken = refreshToken
 	}
 	conn.Scopes = scopes
 	return conn, true

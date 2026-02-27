@@ -19,6 +19,7 @@ import (
 	"mmbot/internal/domain"
 	"mmbot/internal/integrations/openclaw"
 	"mmbot/internal/integrations/telegram"
+	"mmbot/internal/service/oauth"
 	"mmbot/internal/service/risk"
 	storepkg "mmbot/internal/store"
 )
@@ -31,11 +32,12 @@ const (
 )
 
 type Server struct {
-	cfg        config.Config
-	store      storepkg.Store
-	riskEngine *risk.Engine
-	notifier   *telegram.Notifier
-	openClaw   *openclaw.Client
+	cfg         config.Config
+	store       storepkg.Store
+	riskEngine  *risk.Engine
+	notifier    *telegram.Notifier
+	openClaw    *openclaw.Client
+	openAIOAuth *oauth.OpenAIClient
 }
 
 func NewServer(
@@ -51,6 +53,14 @@ func NewServer(
 		riskEngine: riskEngine,
 		notifier:   notifier,
 		openClaw:   openClaw,
+		openAIOAuth: &oauth.OpenAIClient{
+			ClientID:     cfg.OpenAIClientID,
+			ClientSecret: cfg.OpenAIClientSecret,
+			AuthURL:      cfg.OpenAIAuthURL,
+			TokenURL:     cfg.OpenAITokenURL,
+			RedirectURI:  cfg.OpenAIRedirectURI,
+			Scopes:       parseScopes(cfg.OpenAIScopes),
+		},
 	}
 }
 
@@ -297,6 +307,7 @@ func (s *Server) handleEvaluateSignal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn, connected := s.store.GetOpenAIConnection()
+	conn, connected = s.ensureFreshOpenAIConnection(r.Context(), conn, connected)
 	if !connected || conn.ExpiresAt.Before(time.Now().UTC()) {
 		decision := domain.RiskDecision{Allowed: false, DenyReason: "provider_unavailable_fail_closed"}
 		s.emitEvent(domain.EventRiskTriggered, input.AccountID, map[string]interface{}{
@@ -357,6 +368,7 @@ func (s *Server) handleDashboardSummary(w http.ResponseWriter, r *http.Request) 
 		accountID = "paper-1"
 	}
 	conn, connected := s.store.GetOpenAIConnection()
+	conn, connected = s.ensureFreshOpenAIConnection(r.Context(), conn, connected)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"account_id":            accountID,
 		"mode":                  "paper",
@@ -377,18 +389,21 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOpenAIStart(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.OpenAIClientID == "" || s.cfg.OpenAIClientSecret == "" {
+		writeError(w, http.StatusInternalServerError, "openai oauth is not configured")
+		return
+	}
 	state := uuid.NewString()
 	s.store.SaveOAuthState(domain.OAuthState{
 		State:     state,
 		Provider:  "openai",
 		CreatedAt: time.Now().UTC(),
 	})
-	authURL := fmt.Sprintf(
-		"https://auth.openai.com/oauth/authorize?client_id=%s&redirect_uri=%s&response_type=code&scope=models.read%%20models.inference&state=%s",
-		s.cfg.OpenAIClientID,
-		s.cfg.OpenAIRedirectURI,
-		state,
-	)
+	authURL, err := s.openAIOAuth.BuildAuthURL(state)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build openai auth url")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"provider": "openai",
 		"state":    state,
@@ -408,13 +423,22 @@ func (s *Server) handleOpenAICallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// MVP stub: persist a pseudo token until provider token exchange is wired.
+	tokenResp, err := s.openAIOAuth.ExchangeCode(r.Context(), code)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "openai token exchange failed")
+		return
+	}
+	scopeSource := tokenResp.Scope
+	if strings.TrimSpace(scopeSource) == "" {
+		scopeSource = s.cfg.OpenAIScopes
+	}
 	s.store.SaveOpenAIConnection(domain.ProviderConnection{
-		Provider:    "openai",
-		AccessToken: "mock_access_" + code,
-		Scopes:      []string{"models.read", "models.inference"},
-		ConnectedAt: time.Now().UTC(),
-		ExpiresAt:   time.Now().UTC().Add(24 * time.Hour),
+		Provider:     "openai",
+		AccessToken:  tokenResp.AccessToken,
+		RefreshToken: tokenResp.RefreshToken,
+		Scopes:       parseScopes(scopeSource),
+		ConnectedAt:  time.Now().UTC(),
+		ExpiresAt:    time.Now().UTC().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
 	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -425,6 +449,7 @@ func (s *Server) handleOpenAICallback(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleOpenAIStatus(w http.ResponseWriter, r *http.Request) {
 	conn, connected := s.store.GetOpenAIConnection()
+	conn, connected = s.ensureFreshOpenAIConnection(r.Context(), conn, connected)
 	if !connected {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"connected": false,
@@ -444,6 +469,40 @@ func (s *Server) handleOpenAIStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOpenAIDisconnect(w http.ResponseWriter, r *http.Request) {
 	s.store.ClearOpenAIConnection()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) ensureFreshOpenAIConnection(ctx context.Context, conn domain.ProviderConnection, connected bool) (domain.ProviderConnection, bool) {
+	if !connected {
+		return conn, false
+	}
+	if conn.ExpiresAt.After(time.Now().UTC().Add(s.cfg.OpenAIRefreshSkew)) {
+		return conn, true
+	}
+	if strings.TrimSpace(conn.RefreshToken) == "" {
+		return conn, false
+	}
+	tokenResp, err := s.openAIOAuth.Refresh(ctx, conn.RefreshToken)
+	if err != nil {
+		return conn, false
+	}
+	newRefresh := tokenResp.RefreshToken
+	if strings.TrimSpace(newRefresh) == "" {
+		newRefresh = conn.RefreshToken
+	}
+	scopeSource := tokenResp.Scope
+	if strings.TrimSpace(scopeSource) == "" {
+		scopeSource = strings.Join(conn.Scopes, " ")
+	}
+	refreshed := domain.ProviderConnection{
+		Provider:     "openai",
+		AccessToken:  tokenResp.AccessToken,
+		RefreshToken: newRefresh,
+		Scopes:       parseScopes(scopeSource),
+		ConnectedAt:  conn.ConnectedAt,
+		ExpiresAt:    time.Now().UTC().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
+	}
+	s.store.SaveOpenAIConnection(refreshed)
+	return refreshed, true
 }
 
 func (s *Server) calculateVolume() float64 {
@@ -563,4 +622,19 @@ func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func parseScopes(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	normalized := strings.ReplaceAll(raw, ",", " ")
+	parts := strings.Fields(normalized)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

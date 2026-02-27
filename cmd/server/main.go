@@ -23,7 +23,7 @@ func main() {
 	cfg := config.Load()
 	var st storepkg.Store
 	if cfg.StoreMode == "postgres" && cfg.DatabaseURL != "" {
-		pgStore, err := postgres.NewStore(cfg.DatabaseURL, cfg.EATokenTTL)
+		pgStore, err := postgres.NewStore(cfg.DatabaseURL, cfg.EATokenTTL, cfg.OAuthEncryptionKey)
 		if err != nil {
 			log.Printf("postgres store unavailable, falling back to memory store: %v", err)
 			st = memory.NewStore(cfg.EATokenTTL)

@@ -13,6 +13,8 @@ This repository now includes:
 1. Go HTTP backend scaffold with all MVP core endpoints.
 2. PostgreSQL-backed runtime store (commands/events/risk state/OAuth connection) with memory fallback.
 3. PostgreSQL schema migrations (`migrations/0001_init.sql`, `migrations/0002_runtime_state.sql`).
+4. OpenAI OAuth authorization-code exchange + refresh flow.
+5. Encrypted token-at-rest storage for provider access/refresh tokens (AES-GCM).
 4. Risk engine with hard safety rules and unit tests.
 5. Telegram notifier integration.
 6. OpenClaw outbound webhook publisher.
@@ -63,10 +65,11 @@ cp .env.example .env
 
 Important variables:
 - `STORE_MODE`, `DATABASE_URL`
+- `OAUTH_ENCRYPTION_KEY` (base64-encoded 32-byte key)
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `JWT_SECRET`
 - `EA_CONNECT_CODE`, `EA_TOKEN_TTL`
 - `AI_MIN_CONFIDENCE`, `MAX_DAILY_LOSS_PCT`, `MAX_OPEN_POSITIONS`, `MAX_SPREAD_PIPS`
-- `OPENAI_CLIENT_ID`, `OPENAI_REDIRECT_URI`
+- `OPENAI_CLIENT_ID`, `OPENAI_CLIENT_SECRET`, `OPENAI_AUTH_URL`, `OPENAI_TOKEN_URL`, `OPENAI_SCOPES`, `OPENAI_REDIRECT_URI`, `OPENAI_REFRESH_SKEW`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 - `OPENCLAW_WEBHOOK_URL`
 
@@ -95,6 +98,8 @@ go run ./cmd/server
 
 ## Notes
 
-1. OAuth callback currently stores a placeholder provider token for MVP wiring. Replace with real token exchange in production.
-2. Set `STORE_MODE=postgres` + valid `DATABASE_URL` to use persistent runtime state.
-3. Default mode is paper/sim semantics.
+1. OAuth callback now performs real code exchange at configured token endpoint.
+2. Token refresh is attempted automatically before expiry (`OPENAI_REFRESH_SKEW` window).
+3. In Postgres mode, provider tokens are encrypted at rest with `OAUTH_ENCRYPTION_KEY`.
+4. Set `STORE_MODE=postgres` + valid `DATABASE_URL` to use persistent runtime state.
+5. Default mode is paper/sim semantics.
