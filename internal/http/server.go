@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -691,7 +692,16 @@ func (s *Server) emitEvent(eventType domain.EventType, accountID string, payload
 	go func(evt domain.Event) {
 		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.OpenClawTimeout)
 		defer cancel()
-		_ = s.openClaw.Publish(ctx, evt)
+		if err := s.openClaw.Publish(ctx, evt); err != nil {
+			log.Printf("openclaw delivery failed event_id=%s type=%s err=%v", evt.ID, evt.Type, err)
+			if evt.Type != domain.EventOpenClawDeliveryFailed {
+				s.store.AppendEvent(domain.EventOpenClawDeliveryFailed, evt.AccountID, map[string]interface{}{
+					"source_event_id":   evt.ID,
+					"source_event_type": evt.Type,
+					"error":             err.Error(),
+				})
+			}
+		}
 	}(event)
 	return event
 }

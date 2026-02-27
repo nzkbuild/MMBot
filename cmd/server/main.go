@@ -40,7 +40,13 @@ func main() {
 		cfg.MaxSpreadPips,
 	)
 	notifier := telegram.NewNotifier(cfg.TelegramBotToken, cfg.TelegramChatID)
-	openClawClient := openclaw.NewClient(cfg.OpenClawWebhookURL, cfg.OpenClawTimeout)
+	openClawClient := openclaw.NewClient(
+		cfg.OpenClawWebhookURL,
+		cfg.OpenClawTimeout,
+		cfg.OpenClawMaxRetries,
+		cfg.OpenClawRetryBase,
+		cfg.OpenClawRetryMax,
+	)
 
 	srv := apphttp.NewServer(cfg, st, riskEngine, notifier, openClawClient)
 

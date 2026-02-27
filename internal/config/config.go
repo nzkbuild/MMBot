@@ -34,6 +34,9 @@ type Config struct {
 	OpenAIRefreshSkew      time.Duration
 	OpenClawWebhookURL     string
 	OpenClawTimeout        time.Duration
+	OpenClawMaxRetries     int
+	OpenClawRetryBase      time.Duration
+	OpenClawRetryMax       time.Duration
 }
 
 func Load() Config {
@@ -65,6 +68,9 @@ func Load() Config {
 		OpenAIRefreshSkew:      getDuration("OPENAI_REFRESH_SKEW", 2*time.Minute),
 		OpenClawWebhookURL:     getEnv("OPENCLAW_WEBHOOK_URL", ""),
 		OpenClawTimeout:        getDuration("OPENCLAW_TIMEOUT", 5*time.Second),
+		OpenClawMaxRetries:     getInt("OPENCLAW_MAX_RETRIES", 3),
+		OpenClawRetryBase:      getDuration("OPENCLAW_RETRY_BASE", 500*time.Millisecond),
+		OpenClawRetryMax:       getDuration("OPENCLAW_RETRY_MAX", 5*time.Second),
 	}
 }
 

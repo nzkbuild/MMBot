@@ -16,6 +16,7 @@ This repository now includes:
 4. OpenAI OAuth authorization-code exchange + refresh flow.
 5. Encrypted token-at-rest storage for provider access/refresh tokens (AES-GCM).
 6. Real MT5 EA polling/execution implementation (`ea/MMBotEA.mq5`).
+7. Hardened OpenClaw delivery with retries and idempotency headers.
 4. Risk engine with hard safety rules and unit tests.
 5. Telegram notifier integration.
 6. OpenClaw outbound webhook publisher.
@@ -81,6 +82,7 @@ Important variables:
 - `OPENAI_CLIENT_ID`, `OPENAI_CLIENT_SECRET`, `OPENAI_AUTH_URL`, `OPENAI_TOKEN_URL`, `OPENAI_SCOPES`, `OPENAI_REDIRECT_URI`, `OPENAI_REFRESH_SKEW`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 - `OPENCLAW_WEBHOOK_URL`
+- `OPENCLAW_TIMEOUT`, `OPENCLAW_MAX_RETRIES`, `OPENCLAW_RETRY_BASE`, `OPENCLAW_RETRY_MAX`
 
 ## Run PostgreSQL
 
@@ -132,7 +134,9 @@ EA behavior:
 2. Token refresh is attempted automatically before expiry (`OPENAI_REFRESH_SKEW` window).
 3. In Postgres mode, provider tokens are encrypted at rest with `OAUTH_ENCRYPTION_KEY`.
 4. Set `STORE_MODE=postgres` + valid `DATABASE_URL` to use persistent runtime state.
-5. Default mode is paper/sim semantics.
+5. OpenClaw uses `X-Idempotency-Key` = event ID and retries failed deliveries with exponential backoff.
+6. Failed OpenClaw deliveries are logged and appended as `OpenClawDeliveryFailed` events.
+7. Default mode is paper/sim semantics.
 
 ## Strategy Endpoint Payload
 

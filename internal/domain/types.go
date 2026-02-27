@@ -26,11 +26,12 @@ const (
 type EventType string
 
 const (
-	EventSignalProposed EventType = "SignalProposed"
-	EventTradeExecuted  EventType = "TradeExecuted"
-	EventTradeModified  EventType = "TradeModified"
-	EventRiskTriggered  EventType = "RiskTriggered"
-	EventBotPaused      EventType = "BotPaused"
+	EventSignalProposed         EventType = "SignalProposed"
+	EventTradeExecuted          EventType = "TradeExecuted"
+	EventTradeModified          EventType = "TradeModified"
+	EventRiskTriggered          EventType = "RiskTriggered"
+	EventBotPaused              EventType = "BotPaused"
+	EventOpenClawDeliveryFailed EventType = "OpenClawDeliveryFailed"
 )
 
 type Command struct {
