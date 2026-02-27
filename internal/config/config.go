@@ -7,28 +7,32 @@ import (
 )
 
 type Config struct {
-	ListenAddr        string
-	AdminUsername     string
-	AdminPassword     string
-	JWTSecret         string
-	EAConnectCode     string
-	EATokenTTL        time.Duration
-	AIMinConfidence   float64
-	MaxDailyLossPct   float64
-	MaxOpenPositions  int
-	MaxSpreadPips     float64
-	DefaultRiskPct    float64
-	TelegramBotToken  string
-	TelegramChatID    string
-	OpenAIClientID    string
-	OpenAIRedirectURI string
+	ListenAddr         string
+	StoreMode          string
+	DatabaseURL        string
+	AdminUsername      string
+	AdminPassword      string
+	JWTSecret          string
+	EAConnectCode      string
+	EATokenTTL         time.Duration
+	AIMinConfidence    float64
+	MaxDailyLossPct    float64
+	MaxOpenPositions   int
+	MaxSpreadPips      float64
+	DefaultRiskPct     float64
+	TelegramBotToken   string
+	TelegramChatID     string
+	OpenAIClientID     string
+	OpenAIRedirectURI  string
 	OpenClawWebhookURL string
-	OpenClawTimeout   time.Duration
+	OpenClawTimeout    time.Duration
 }
 
 func Load() Config {
 	return Config{
 		ListenAddr:         getEnv("LISTEN_ADDR", ":8080"),
+		StoreMode:          getEnv("STORE_MODE", "postgres"),
+		DatabaseURL:        getEnv("DATABASE_URL", ""),
 		AdminUsername:      getEnv("ADMIN_USERNAME", "admin"),
 		AdminPassword:      getEnv("ADMIN_PASSWORD", "change-me"),
 		JWTSecret:          getEnv("JWT_SECRET", "change-this-secret"),
@@ -91,4 +95,3 @@ func getDuration(key string, fallback time.Duration) time.Duration {
 	}
 	return d
 }
-

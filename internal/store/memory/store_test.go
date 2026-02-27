@@ -35,4 +35,3 @@ func TestQueueAndDispatchCommand(t *testing.T) {
 		t.Fatalf("expected dispatched status, got %s", cmd.Status)
 	}
 }
-

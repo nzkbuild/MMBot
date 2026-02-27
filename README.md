@@ -11,8 +11,8 @@ AI-assisted trading autopilot MVP:
 
 This repository now includes:
 1. Go HTTP backend scaffold with all MVP core endpoints.
-2. In-memory runtime store for fast local iteration.
-3. PostgreSQL schema migration for production persistence (`migrations/0001_init.sql`).
+2. PostgreSQL-backed runtime store (commands/events/risk state/OAuth connection) with memory fallback.
+3. PostgreSQL schema migrations (`migrations/0001_init.sql`, `migrations/0002_runtime_state.sql`).
 4. Risk engine with hard safety rules and unit tests.
 5. Telegram notifier integration.
 6. OpenClaw outbound webhook publisher.
@@ -62,6 +62,7 @@ cp .env.example .env
 ```
 
 Important variables:
+- `STORE_MODE`, `DATABASE_URL`
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `JWT_SECRET`
 - `EA_CONNECT_CODE`, `EA_TOKEN_TTL`
 - `AI_MIN_CONFIDENCE`, `MAX_DAILY_LOSS_PCT`, `MAX_OPEN_POSITIONS`, `MAX_SPREAD_PIPS`
@@ -95,6 +96,5 @@ go run ./cmd/server
 ## Notes
 
 1. OAuth callback currently stores a placeholder provider token for MVP wiring. Replace with real token exchange in production.
-2. Runtime persistence currently uses in-memory state; Postgres schema is included for next persistence step.
+2. Set `STORE_MODE=postgres` + valid `DATABASE_URL` to use persistent runtime state.
 3. Default mode is paper/sim semantics.
-

@@ -48,4 +48,3 @@ func (c *Client) Publish(ctx context.Context, event domain.Event) error {
 	defer resp.Body.Close()
 	return nil
 }
-

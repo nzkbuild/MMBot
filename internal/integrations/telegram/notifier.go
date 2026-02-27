@@ -50,4 +50,3 @@ func (n *Notifier) Notify(ctx context.Context, text string) error {
 	defer resp.Body.Close()
 	return nil
 }
-

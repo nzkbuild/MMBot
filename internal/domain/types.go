@@ -111,4 +111,3 @@ type RiskDecision struct {
 	Allowed    bool   `json:"allowed"`
 	DenyReason string `json:"deny_reason,omitempty"`
 }
-

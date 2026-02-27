@@ -57,4 +57,3 @@ func TestEvaluate_RejectsPaused(t *testing.T) {
 		t.Fatalf("expected bot_paused, got %+v", decision)
 	}
 }
-

@@ -14,12 +14,25 @@ import (
 	"mmbot/internal/integrations/openclaw"
 	"mmbot/internal/integrations/telegram"
 	"mmbot/internal/service/risk"
+	storepkg "mmbot/internal/store"
 	"mmbot/internal/store/memory"
+	"mmbot/internal/store/postgres"
 )
 
 func main() {
 	cfg := config.Load()
-	store := memory.NewStore(cfg.EATokenTTL)
+	var st storepkg.Store
+	if cfg.StoreMode == "postgres" && cfg.DatabaseURL != "" {
+		pgStore, err := postgres.NewStore(cfg.DatabaseURL, cfg.EATokenTTL)
+		if err != nil {
+			log.Printf("postgres store unavailable, falling back to memory store: %v", err)
+			st = memory.NewStore(cfg.EATokenTTL)
+		} else {
+			st = pgStore
+		}
+	} else {
+		st = memory.NewStore(cfg.EATokenTTL)
+	}
 	riskEngine := risk.NewEngine(
 		cfg.MaxOpenPositions,
 		cfg.MaxDailyLossPct,
@@ -29,7 +42,7 @@ func main() {
 	notifier := telegram.NewNotifier(cfg.TelegramBotToken, cfg.TelegramChatID)
 	openClawClient := openclaw.NewClient(cfg.OpenClawWebhookURL, cfg.OpenClawTimeout)
 
-	srv := apphttp.NewServer(cfg, store, riskEngine, notifier, openClawClient)
+	srv := apphttp.NewServer(cfg, st, riskEngine, notifier, openClawClient)
 
 	httpServer := &http.Server{
 		Addr:         cfg.ListenAddr,
@@ -56,4 +69,3 @@ func main() {
 		log.Printf("graceful shutdown failed: %v", err)
 	}
 }
-

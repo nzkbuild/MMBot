@@ -8,9 +8,9 @@ import (
 
 type Engine struct {
 	maxOpenPositions int
-	maxDailyLossPct float64
-	minConfidence   float64
-	maxSpreadPips   float64
+	maxDailyLossPct  float64
+	minConfidence    float64
+	maxSpreadPips    float64
 }
 
 func NewEngine(maxOpenPositions int, maxDailyLossPct, minConfidence, maxSpreadPips float64) *Engine {
@@ -49,4 +49,3 @@ func (e *Engine) Evaluate(input domain.SignalInput, state domain.StrategyState) 
 	}
 	return domain.RiskDecision{Allowed: true}
 }
-

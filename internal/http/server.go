@@ -20,7 +20,7 @@ import (
 	"mmbot/internal/integrations/openclaw"
 	"mmbot/internal/integrations/telegram"
 	"mmbot/internal/service/risk"
-	"mmbot/internal/store/memory"
+	storepkg "mmbot/internal/store"
 )
 
 type contextKey string
@@ -31,16 +31,16 @@ const (
 )
 
 type Server struct {
-	cfg         config.Config
-	store       *memory.Store
-	riskEngine  *risk.Engine
-	notifier    *telegram.Notifier
-	openClaw    *openclaw.Client
+	cfg        config.Config
+	store      storepkg.Store
+	riskEngine *risk.Engine
+	notifier   *telegram.Notifier
+	openClaw   *openclaw.Client
 }
 
 func NewServer(
 	cfg config.Config,
-	store *memory.Store,
+	store storepkg.Store,
 	riskEngine *risk.Engine,
 	notifier *telegram.Notifier,
 	openClaw *openclaw.Client,
@@ -564,4 +564,3 @@ func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
-

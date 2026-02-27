@@ -256,4 +256,3 @@ func (s *Store) ClearOpenAIConnection() {
 	defer s.mu.Unlock()
 	s.openAIConnection = nil
 }
-
