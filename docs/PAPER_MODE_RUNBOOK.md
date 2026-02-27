@@ -11,7 +11,7 @@ Validate MMBot end-to-end in paper mode and provide incident-response steps for 
 3. OpenAI provider auth configured:
    - preferred: `OPENAI_API_KEY`, or
    - optional: OAuth client settings + callback flow.
-4. Backend started (`go run ./cmd/server`).
+4. Backend started (`go run ./cmd/server`) with `.env` in current working directory.
 5. MT5 terminal configured with `WebRequest` allowlist including backend URL.
 6. Strategy guardrails tuned for your account usage pattern:
    - `STRATEGY_RATE_LIMIT_PER_MIN`
@@ -36,7 +36,7 @@ go build ./...
 
 ```powershell
 ./scripts/paper-smoke.ps1 `
-  -BaseUrl "http://127.0.0.1:8080" `
+  -BaseUrl "http://127.0.0.1:18080" `
   -AdminUsername "admin" `
   -AdminPassword "change-me" `
   -ConnectCode "MMBOT-ONE-TIME-CODE" `
@@ -48,7 +48,7 @@ Optional Telegram command check:
 
 ```powershell
 ./scripts/paper-smoke.ps1 `
-  -BaseUrl "http://127.0.0.1:8080" `
+  -BaseUrl "http://127.0.0.1:18080" `
   -AdminUsername "admin" `
   -AdminPassword "change-me" `
   -ConnectCode "MMBOT-ONE-TIME-CODE" `

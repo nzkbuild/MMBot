@@ -4,7 +4,7 @@
 
 #property strict
 
-input string ApiBaseUrl = "http://127.0.0.1:8080";
+input string ApiBaseUrl = "http://127.0.0.1:18080";
 input string AccountId = "paper-1";
 input string DeviceId = "mt5-device-1";
 input string ConnectCode = "MMBOT-ONE-TIME-CODE";
@@ -12,7 +12,7 @@ input string ConnectCode = "MMBOT-ONE-TIME-CODE";
 string g_token = "";
 
 int OnInit() {
-   EventSetTimer(2);
+   EventSetTimer(5);
    return(INIT_SUCCEEDED);
 }
 

@@ -20,6 +20,9 @@ import (
 )
 
 func main() {
+	if err := config.LoadDotEnv(".env"); err != nil {
+		log.Printf("failed to load .env: %v", err)
+	}
 	cfg := config.Load()
 	var st storepkg.Store
 	if cfg.StoreMode == "postgres" && cfg.DatabaseURL != "" {

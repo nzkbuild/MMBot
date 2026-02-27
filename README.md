@@ -74,6 +74,8 @@ Copy `.env.example` and set values:
 cp .env.example .env
 ```
 
+The backend auto-loads `.env` from the current working directory on startup.
+
 Important variables:
 - `STORE_MODE`, `DATABASE_URL`
 - `OAUTH_ENCRYPTION_KEY` (base64-encoded 32-byte key)
@@ -101,8 +103,12 @@ The migration SQL is mounted to `docker-entrypoint-initdb.d` and auto-applies on
 go run ./cmd/server
 ```
 
+Default listen address is `:18080` (override via `LISTEN_ADDR`).
+
 Paper-mode validation runbook:
 - [PAPER_MODE_RUNBOOK.md](C:/Users/nbzkr/OneDrive/Documents/Coding/MMBot/docs/PAPER_MODE_RUNBOOK.md)
+Go-live checklist:
+- [GO_LIVE_CHECKLIST.md](C:/Users/nbzkr/OneDrive/Documents/Coding/MMBot/docs/GO_LIVE_CHECKLIST.md)
 
 ## MT5 EA (Real Loop)
 
@@ -115,7 +121,7 @@ Compile and attach:
 Required MT5 setting:
 1. In MT5, go to `Tools -> Options -> Expert Advisors`.
 2. Enable `Allow WebRequest for listed URL`.
-3. Add your backend base URL (example: `http://127.0.0.1:8080`).
+3. Add your backend base URL (recommended: `http://127.0.0.1:18080`).
 
 EA behavior:
 1. Registers with `/ea/register` using connect code.

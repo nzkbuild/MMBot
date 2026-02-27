@@ -6,12 +6,12 @@
 
 #include <Trade/Trade.mqh>
 
-input string ApiBaseUrl           = "http://127.0.0.1:8080";
+input string ApiBaseUrl           = "http://127.0.0.1:18080";
 input string AccountId            = "paper-1";
 input string DeviceId             = "mt5-device-1";
 input string ConnectCode          = "MMBOT-ONE-TIME-CODE";
-input int    PollIntervalSeconds  = 2;
-input int    SyncEveryLoops       = 5;      // every N timer loops
+input int    PollIntervalSeconds  = 5;
+input int    SyncEveryLoops       = 10;     // every N timer loops
 input int    RequestTimeoutMs     = 5000;
 input bool   VerboseLogs          = true;
 input bool   CloseBySymbolOnly    = true;   // CLOSE command scope guard

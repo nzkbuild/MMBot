@@ -47,7 +47,7 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		ListenAddr:              getEnv("LISTEN_ADDR", ":8080"),
+		ListenAddr:              getEnv("LISTEN_ADDR", ":18080"),
 		StoreMode:               getEnv("STORE_MODE", "postgres"),
 		DatabaseURL:             getEnv("DATABASE_URL", ""),
 		OAuthEncryptionKey:      getEnv("OAUTH_ENCRYPTION_KEY", ""),
@@ -76,7 +76,7 @@ func Load() Config {
 		OpenAIAuthURL:           getEnv("OPENAI_AUTH_URL", "https://auth.openai.com/oauth/authorize"),
 		OpenAITokenURL:          getEnv("OPENAI_TOKEN_URL", "https://auth.openai.com/oauth/token"),
 		OpenAIScopes:            getEnv("OPENAI_SCOPES", "models.read models.inference"),
-		OpenAIRedirectURI:       getEnv("OPENAI_REDIRECT_URI", "http://localhost:8080/oauth/openai/callback"),
+		OpenAIRedirectURI:       getEnv("OPENAI_REDIRECT_URI", "http://localhost:18080/oauth/openai/callback"),
 		OpenAIRefreshSkew:       getDuration("OPENAI_REFRESH_SKEW", 2*time.Minute),
 		OpenClawWebhookURL:      getEnv("OPENCLAW_WEBHOOK_URL", ""),
 		OpenClawTimeout:         getDuration("OPENCLAW_TIMEOUT", 5*time.Second),
