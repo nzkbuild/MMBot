@@ -33,13 +33,14 @@ const (
 )
 
 type Server struct {
-	cfg         config.Config
-	store       storepkg.Store
-	riskEngine  *risk.Engine
-	notifier    *telegram.Notifier
-	openClaw    *openclaw.Client
-	openAIOAuth *oauth.OpenAIClient
-	trendEngine *strategy.TrendEngine
+	cfg                  config.Config
+	store                storepkg.Store
+	riskEngine           *risk.Engine
+	notifier             *telegram.Notifier
+	openClaw             *openclaw.Client
+	openAIOAuth          *oauth.OpenAIClient
+	trendEngine          *strategy.TrendEngine
+	allowedTelegramChats map[string]bool
 }
 
 func NewServer(
@@ -49,6 +50,13 @@ func NewServer(
 	notifier *telegram.Notifier,
 	openClaw *openclaw.Client,
 ) *Server {
+	allowedChats := make(map[string]bool)
+	for _, id := range parseCSVList(cfg.TelegramAllowedChatIDs) {
+		allowedChats[id] = true
+	}
+	if strings.TrimSpace(cfg.TelegramChatID) != "" {
+		allowedChats[strings.TrimSpace(cfg.TelegramChatID)] = true
+	}
 	return &Server{
 		cfg:        cfg,
 		store:      store,
@@ -63,7 +71,8 @@ func NewServer(
 			RedirectURI:  cfg.OpenAIRedirectURI,
 			Scopes:       parseScopes(cfg.OpenAIScopes),
 		},
-		trendEngine: strategy.NewTrendEngine(),
+		trendEngine:          strategy.NewTrendEngine(),
+		allowedTelegramChats: allowedChats,
 	}
 }
 
@@ -75,6 +84,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Post("/admin/login", s.handleAdminLogin)
 	r.Post("/ea/register", s.handleEARegister)
+	r.Post("/telegram/webhook", s.handleTelegramWebhook)
 
 	r.Get("/oauth/openai/start", s.handleOpenAIStart)
 	r.Get("/oauth/openai/callback", s.handleOpenAICallback)
@@ -139,6 +149,88 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.TelegramWebhookSecret != "" {
+		secret := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
+		if secret != s.cfg.TelegramWebhookSecret {
+			writeError(w, http.StatusUnauthorized, "invalid telegram webhook secret")
+			return
+		}
+	}
+
+	var update struct {
+		UpdateID int64 `json:"update_id"`
+		Message  struct {
+			MessageID int64  `json:"message_id"`
+			Text      string `json:"text"`
+			Chat      struct {
+				ID int64 `json:"id"`
+			} `json:"chat"`
+		} `json:"message"`
+	}
+	if err := decodeJSON(r, &update); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	chatID := strconv.FormatInt(update.Message.Chat.ID, 10)
+	if !s.isAllowedTelegramChat(chatID) {
+		// Return 200 to avoid webhook retry loops for unauthorized chats.
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+
+	cmd := strings.TrimSpace(update.Message.Text)
+	if cmd == "" {
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	tokens := strings.Fields(cmd)
+	if len(tokens) == 0 {
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	command := strings.ToLower(tokens[0])
+	accountID := "paper-1"
+	if len(tokens) > 1 && strings.TrimSpace(tokens[1]) != "" {
+		accountID = strings.TrimSpace(tokens[1])
+	}
+
+	switch command {
+	case "/pause":
+		event := s.setPausedState(r.Context(), true, "telegram")
+		_ = s.notifier.NotifyChat(r.Context(), chatID, "Paused. New OPEN commands are blocked.")
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "event_id": event.ID})
+		return
+	case "/resume":
+		event := s.setPausedState(r.Context(), false, "telegram")
+		_ = s.notifier.NotifyChat(r.Context(), chatID, "Resumed. New OPEN commands are allowed.")
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "event_id": event.ID})
+		return
+	case "/today":
+		conn, connected := s.store.GetOpenAIConnection()
+		conn, connected = s.ensureFreshOpenAIConnection(r.Context(), conn, connected)
+		msg := fmt.Sprintf(
+			"MMBot status\nAccount: %s\nPaused: %t\nOpen positions: %d\nDaily loss: %.2f%%\nAI connected: %t",
+			accountID,
+			s.store.IsPaused(),
+			s.store.OpenPositions(accountID),
+			s.store.DailyLoss(accountID),
+			connected && conn.ExpiresAt.After(time.Now().UTC()),
+		)
+		_ = s.notifier.NotifyChat(r.Context(), chatID, msg)
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	case "/help":
+		_ = s.notifier.NotifyChat(r.Context(), chatID, "Commands: /pause, /resume, /today [account_id], /help")
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	default:
+		_ = s.notifier.NotifyChat(r.Context(), chatID, "Unknown command. Use /help.")
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
 }
 
 func (s *Server) handleEARegister(w http.ResponseWriter, r *http.Request) {
@@ -307,11 +399,7 @@ func (s *Server) handleEAResult(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePause(w http.ResponseWriter, r *http.Request) {
-	s.store.SetPaused(true)
-	event := s.emitEvent(domain.EventBotPaused, "", map[string]interface{}{
-		"paused": true,
-		"source": "admin",
-	})
+	event := s.setPausedState(r.Context(), true, "admin")
 	_ = s.notifier.Notify(r.Context(), "MMBot paused: new OPEN commands are blocked.")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":       true,
@@ -320,11 +408,7 @@ func (s *Server) handlePause(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
-	s.store.SetPaused(false)
-	event := s.emitEvent(domain.EventBotPaused, "", map[string]interface{}{
-		"paused": false,
-		"source": "admin",
-	})
+	event := s.setPausedState(r.Context(), false, "admin")
 	_ = s.notifier.Notify(r.Context(), "MMBot resumed: OPEN commands are allowed again.")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":       true,
@@ -729,4 +813,38 @@ func parseScopes(raw string) []string {
 		}
 	}
 	return out
+}
+
+func parseCSVList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func (s *Server) isAllowedTelegramChat(chatID string) bool {
+	if chatID == "" {
+		return false
+	}
+	if len(s.allowedTelegramChats) == 0 {
+		return true
+	}
+	return s.allowedTelegramChats[chatID]
+}
+
+func (s *Server) setPausedState(ctx context.Context, paused bool, source string) domain.Event {
+	_ = ctx
+	s.store.SetPaused(paused)
+	return s.emitEvent(domain.EventBotPaused, "", map[string]interface{}{
+		"paused": paused,
+		"source": source,
+	})
 }

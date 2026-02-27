@@ -26,6 +26,7 @@ This repository now includes:
 ### Public
 - `POST /admin/login`
 - `POST /ea/register`
+- `POST /telegram/webhook`
 - `GET /oauth/openai/start`
 - `GET /oauth/openai/callback`
 - `GET /health`
@@ -158,3 +159,20 @@ Expected behavior:
 1. Trend engine evaluates EMA20/EMA50 + ATR from provided candles.
 2. If no trend setup, returns `has_signal=false`.
 3. If setup exists, risk/AI gate runs and command is queued for EA polling.
+
+## Telegram Commands (Webhook)
+
+Webhook endpoint:
+- `POST /telegram/webhook`
+
+Supported commands from allowed chats:
+1. `/pause`
+2. `/resume`
+3. `/today [account_id]`
+4. `/help`
+
+Relevant env vars:
+1. `TELEGRAM_BOT_TOKEN`
+2. `TELEGRAM_CHAT_ID` (default trusted chat)
+3. `TELEGRAM_ALLOWED_CHAT_IDS` (comma-separated extra trusted chat IDs)
+4. `TELEGRAM_WEBHOOK_SECRET` (validate `X-Telegram-Bot-Api-Secret-Token`)

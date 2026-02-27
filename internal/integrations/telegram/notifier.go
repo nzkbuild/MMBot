@@ -24,13 +24,17 @@ func NewNotifier(botToken, chatID string) *Notifier {
 }
 
 func (n *Notifier) Notify(ctx context.Context, text string) error {
-	if n.botToken == "" || n.chatID == "" || text == "" {
+	return n.NotifyChat(ctx, n.chatID, text)
+}
+
+func (n *Notifier) NotifyChat(ctx context.Context, chatID, text string) error {
+	if n.botToken == "" || chatID == "" || text == "" {
 		return nil
 	}
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.botToken)
 
 	body := map[string]string{
-		"chat_id": n.chatID,
+		"chat_id": chatID,
 		"text":    text,
 	}
 	raw, err := json.Marshal(body)
@@ -48,5 +52,8 @@ func (n *Notifier) Notify(ctx context.Context, text string) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("telegram sendMessage failed: status=%d", resp.StatusCode)
+	}
 	return nil
 }
