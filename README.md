@@ -7,6 +7,11 @@ AI-assisted trading autopilot MVP:
 - Telegram provides alerts/control.
 - OpenClaw receives outbound events.
 
+## Release
+
+- Current release: `v0.1.0-paper`
+- See `CHANGELOG.md` for details.
+
 ## Current Implementation Status
 
 This repository now includes:
