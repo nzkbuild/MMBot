@@ -3,7 +3,7 @@
 AI-assisted trading autopilot MVP:
 - MT5 EA executes broker actions.
 - Go backend handles strategy/risk/orchestration.
-- OpenAI OAuth is used for provider authorization.
+- OpenAI provider auth supports API key mode (`OPENAI_API_KEY`) and OAuth mode.
 - Telegram provides alerts/control.
 - OpenClaw receives outbound events.
 
@@ -11,10 +11,10 @@ AI-assisted trading autopilot MVP:
 
 This repository now includes:
 1. Go HTTP backend scaffold with all MVP core endpoints.
-2. PostgreSQL-backed runtime store (commands/events/risk state/OAuth connection) with memory fallback.
+2. PostgreSQL-backed runtime store (commands/events/risk state/provider connection) with memory fallback.
 3. PostgreSQL schema migrations (`migrations/0001_init.sql`, `migrations/0002_runtime_state.sql`).
-4. OpenAI OAuth authorization-code exchange + refresh flow.
-5. Encrypted token-at-rest storage for provider access/refresh tokens (AES-GCM).
+4. OpenAI provider auth with API key fast-path and OAuth authorization-code exchange + refresh fallback.
+5. Encrypted token-at-rest storage for OAuth provider access/refresh tokens (AES-GCM).
 6. Real MT5 EA polling/execution implementation (`ea/MMBotEA.mq5`).
 7. Hardened OpenClaw delivery with retries and idempotency headers.
 4. Risk engine with hard safety rules and unit tests.
@@ -79,7 +79,8 @@ Important variables:
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `JWT_SECRET`
 - `EA_CONNECT_CODE`, `EA_TOKEN_TTL`
 - `AI_MIN_CONFIDENCE`, `MAX_DAILY_LOSS_PCT`, `MAX_OPEN_POSITIONS`, `MAX_SPREAD_PIPS`
-- `OPENAI_CLIENT_ID`, `OPENAI_CLIENT_SECRET`, `OPENAI_AUTH_URL`, `OPENAI_TOKEN_URL`, `OPENAI_SCOPES`, `OPENAI_REDIRECT_URI`, `OPENAI_REFRESH_SKEW`
+- `OPENAI_API_KEY` (recommended)
+- `OPENAI_CLIENT_ID`, `OPENAI_CLIENT_SECRET`, `OPENAI_AUTH_URL`, `OPENAI_TOKEN_URL`, `OPENAI_SCOPES`, `OPENAI_REDIRECT_URI`, `OPENAI_REFRESH_SKEW` (optional OAuth mode)
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 - `OPENCLAW_WEBHOOK_URL`
 - `OPENCLAW_TIMEOUT`, `OPENCLAW_MAX_RETRIES`, `OPENCLAW_RETRY_BASE`, `OPENCLAW_RETRY_MAX`
@@ -125,7 +126,9 @@ EA behavior:
 ## Quick Manual Flow
 
 1. `POST /admin/login` to get admin JWT.
-2. `GET /oauth/openai/start`, then call `/oauth/openai/callback` with `state` + `code`.
+2. Configure provider auth:
+   - Recommended: set `OPENAI_API_KEY` and skip OAuth routes.
+   - Optional OAuth: `GET /oauth/openai/start`, then call `/oauth/openai/callback` with `state` + `code`.
 3. `POST /ea/register` using connect code.
 4. `POST /admin/strategy/evaluate` with M15 candles payload.
 5. EA polls `/ea/execute`, performs action, posts `/ea/result`.
@@ -133,9 +136,10 @@ EA behavior:
 
 ## Notes
 
-1. OAuth callback now performs real code exchange at configured token endpoint.
-2. Token refresh is attempted automatically before expiry (`OPENAI_REFRESH_SKEW` window).
-3. In Postgres mode, provider tokens are encrypted at rest with `OAUTH_ENCRYPTION_KEY`.
+1. If `OPENAI_API_KEY` is set, provider is considered connected and OAuth routes become optional no-ops.
+2. In OAuth mode, callback performs real code exchange at configured token endpoint.
+3. In OAuth mode, token refresh is attempted automatically before expiry (`OPENAI_REFRESH_SKEW` window).
+4. In Postgres mode, OAuth provider tokens are encrypted at rest with `OAUTH_ENCRYPTION_KEY`.
 4. Set `STORE_MODE=postgres` + valid `DATABASE_URL` to use persistent runtime state.
 5. OpenClaw uses `X-Idempotency-Key` = event ID and retries failed deliveries with exponential backoff.
 6. Failed OpenClaw deliveries are logged and appended as `OpenClawDeliveryFailed` events.

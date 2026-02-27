@@ -156,6 +156,71 @@ func TestE2E_PaperFlow_WithOAuthAndEAExecution(t *testing.T) {
 	}
 }
 
+func TestE2E_PaperFlow_WithAPIKeyMode(t *testing.T) {
+	cfg := config.Config{
+		AdminUsername:    "admin",
+		AdminPassword:    "pw",
+		JWTSecret:        "jwt-secret",
+		EAConnectCode:    "MMBOT-ONE-TIME-CODE",
+		EATokenTTL:       24 * time.Hour,
+		AIMinConfidence:  0.70,
+		MaxDailyLossPct:  2.0,
+		MaxOpenPositions: 3,
+		MaxSpreadPips:    2.0,
+		OpenAIAPIKey:     "sk-test",
+		OpenClawTimeout:  1 * time.Second,
+	}
+
+	store := memory.NewStore(24 * time.Hour)
+	srv := NewServer(
+		cfg,
+		store,
+		risk.NewEngine(cfg.MaxOpenPositions, cfg.MaxDailyLossPct, cfg.AIMinConfidence, cfg.MaxSpreadPips),
+		telegram.NewNotifier("", ""),
+		openclaw.NewClient("", time.Second, 0, 100*time.Millisecond, time.Second),
+	)
+	api := httptest.NewServer(srv.Router())
+	defer api.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	adminLoginResp := postJSON(t, client, api.URL+"/admin/login", map[string]string{
+		"username": "admin",
+		"password": "pw",
+	}, "")
+	adminToken := strField(t, adminLoginResp, "token")
+	if adminToken == "" {
+		t.Fatalf("expected admin token")
+	}
+
+	statusResp := getJSON(t, client, api.URL+"/oauth/openai/status", adminToken)
+	if !boolField(statusResp, "connected") {
+		t.Fatalf("expected connected=true in API key mode, got: %#v", statusResp)
+	}
+
+	eaRegResp := postJSON(t, client, api.URL+"/ea/register", map[string]string{
+		"connect_code": "MMBOT-ONE-TIME-CODE",
+		"account_id":   "paper-1",
+		"device_id":    "dev-1",
+	}, "")
+	eaToken := strField(t, eaRegResp, "token")
+	if eaToken == "" {
+		t.Fatalf("expected ea token")
+	}
+	_ = postJSON(t, client, api.URL+"/ea/heartbeat", map[string]interface{}{}, eaToken)
+
+	strategyPayload := map[string]interface{}{
+		"account_id":  "paper-1",
+		"symbol":      "EURUSD",
+		"spread_pips": 1.1,
+		"candles":     uptrendCandles(120),
+	}
+	evalResp := postJSON(t, client, api.URL+"/admin/strategy/evaluate", strategyPayload, adminToken)
+	if !boolField(evalResp, "allowed") {
+		t.Fatalf("expected allowed strategy response, got: %#v", evalResp)
+	}
+}
+
 func TestE2E_SyncDailyLossCircuitBreaker(t *testing.T) {
 	cfg := config.Config{
 		AdminUsername:    "admin",

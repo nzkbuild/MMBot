@@ -210,15 +210,14 @@ func (s *Server) handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "event_id": event.ID})
 		return
 	case "/today":
-		conn, connected := s.store.GetOpenAIConnection()
-		conn, connected = s.ensureFreshOpenAIConnection(r.Context(), conn, connected)
+		connected := s.openAIConnected(r.Context())
 		msg := fmt.Sprintf(
 			"MMBot status\nAccount: %s\nPaused: %t\nOpen positions: %d\nDaily loss: %.2f%%\nAI connected: %t",
 			accountID,
 			s.store.IsPaused(),
 			s.store.OpenPositions(accountID),
 			s.store.DailyLoss(accountID),
-			connected && conn.ExpiresAt.After(time.Now().UTC()),
+			connected,
 		)
 		_ = s.notifier.NotifyChat(r.Context(), chatID, msg)
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -479,9 +478,7 @@ func (s *Server) handleTrendEvaluate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) evaluateAndQueue(ctx context.Context, input domain.SignalInput) map[string]interface{} {
-	conn, connected := s.store.GetOpenAIConnection()
-	conn, connected = s.ensureFreshOpenAIConnection(ctx, conn, connected)
-	if !connected || conn.ExpiresAt.Before(time.Now().UTC()) {
+	if !s.openAIConnected(ctx) {
 		decision := domain.RiskDecision{Allowed: false, DenyReason: "provider_unavailable_fail_closed"}
 		s.emitEvent(domain.EventRiskTriggered, input.AccountID, map[string]interface{}{
 			"reason": decision.DenyReason,
@@ -544,15 +541,14 @@ func (s *Server) handleDashboardSummary(w http.ResponseWriter, r *http.Request) 
 	if accountID == "" {
 		accountID = "paper-1"
 	}
-	conn, connected := s.store.GetOpenAIConnection()
-	conn, connected = s.ensureFreshOpenAIConnection(r.Context(), conn, connected)
+	connected := s.openAIConnected(r.Context())
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"account_id":            accountID,
 		"mode":                  "paper",
 		"paused":                s.store.IsPaused(),
 		"open_positions":        s.store.OpenPositions(accountID),
 		"daily_loss_pct":        s.store.DailyLoss(accountID),
-		"ai_provider_connected": connected && conn.ExpiresAt.After(time.Now().UTC()),
+		"ai_provider_connected": connected,
 		"last_events":           s.store.ListEvents(20),
 	})
 }
@@ -566,6 +562,15 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOpenAIStart(w http.ResponseWriter, r *http.Request) {
+	if s.apiKeyConfigured() {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"connected": true,
+			"provider":  "openai",
+			"auth_mode": "api_key",
+			"message":   "OPENAI_API_KEY is configured; OAuth flow is not required",
+		})
+		return
+	}
 	if s.cfg.OpenAIClientID == "" || s.cfg.OpenAIClientSecret == "" {
 		writeError(w, http.StatusInternalServerError, "openai oauth is not configured")
 		return
@@ -589,6 +594,14 @@ func (s *Server) handleOpenAIStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOpenAICallback(w http.ResponseWriter, r *http.Request) {
+	if s.apiKeyConfigured() {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"connected": true,
+			"provider":  "openai",
+			"auth_mode": "api_key",
+		})
+		return
+	}
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
 	if state == "" || code == "" {
@@ -625,6 +638,15 @@ func (s *Server) handleOpenAICallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOpenAIStatus(w http.ResponseWriter, r *http.Request) {
+	if s.apiKeyConfigured() {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"connected":  true,
+			"provider":   "openai",
+			"auth_mode":  "api_key",
+			"configured": true,
+		})
+		return
+	}
 	conn, connected := s.store.GetOpenAIConnection()
 	conn, connected = s.ensureFreshOpenAIConnection(r.Context(), conn, connected)
 	if !connected {
@@ -644,6 +666,15 @@ func (s *Server) handleOpenAIStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOpenAIDisconnect(w http.ResponseWriter, r *http.Request) {
+	if s.apiKeyConfigured() {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":        true,
+			"connected": true,
+			"auth_mode": "api_key",
+			"message":   "OPENAI_API_KEY is environment-managed; nothing to disconnect",
+		})
+		return
+	}
 	s.store.ClearOpenAIConnection()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -680,6 +711,19 @@ func (s *Server) ensureFreshOpenAIConnection(ctx context.Context, conn domain.Pr
 	}
 	s.store.SaveOpenAIConnection(refreshed)
 	return refreshed, true
+}
+
+func (s *Server) apiKeyConfigured() bool {
+	return strings.TrimSpace(s.cfg.OpenAIAPIKey) != ""
+}
+
+func (s *Server) openAIConnected(ctx context.Context) bool {
+	if s.apiKeyConfigured() {
+		return true
+	}
+	conn, connected := s.store.GetOpenAIConnection()
+	conn, connected = s.ensureFreshOpenAIConnection(ctx, conn, connected)
+	return connected && conn.ExpiresAt.After(time.Now().UTC())
 }
 
 func (s *Server) calculateVolume() float64 {

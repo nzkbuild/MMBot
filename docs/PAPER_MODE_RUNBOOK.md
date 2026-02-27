@@ -8,8 +8,11 @@ Validate MMBot end-to-end in paper mode and provide incident-response steps for 
 
 1. Go 1.22+ installed.
 2. `.env` configured from `.env.example`.
-3. Backend started (`go run ./cmd/server`).
-4. MT5 terminal configured with `WebRequest` allowlist including backend URL.
+3. OpenAI provider auth configured:
+   - preferred: `OPENAI_API_KEY`, or
+   - optional: OAuth client settings + callback flow.
+4. Backend started (`go run ./cmd/server`).
+5. MT5 terminal configured with `WebRequest` allowlist including backend URL.
 
 ## Automated Validation
 
@@ -118,4 +121,3 @@ Checks:
 Actions:
 1. Correct webhook secret and allowlist values.
 2. Re-send `/help` from trusted chat to verify command path.
-

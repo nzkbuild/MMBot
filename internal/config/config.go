@@ -25,6 +25,7 @@ type Config struct {
 	TelegramChatID         string
 	TelegramAllowedChatIDs string
 	TelegramWebhookSecret  string
+	OpenAIAPIKey           string
 	OpenAIClientID         string
 	OpenAIClientSecret     string
 	OpenAIAuthURL          string
@@ -59,6 +60,7 @@ func Load() Config {
 		TelegramChatID:         getEnv("TELEGRAM_CHAT_ID", ""),
 		TelegramAllowedChatIDs: getEnv("TELEGRAM_ALLOWED_CHAT_IDS", ""),
 		TelegramWebhookSecret:  getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
+		OpenAIAPIKey:           getEnv("OPENAI_API_KEY", ""),
 		OpenAIClientID:         getEnv("OPENAI_CLIENT_ID", ""),
 		OpenAIClientSecret:     getEnv("OPENAI_CLIENT_SECRET", ""),
 		OpenAIAuthURL:          getEnv("OPENAI_AUTH_URL", "https://auth.openai.com/oauth/authorize"),
