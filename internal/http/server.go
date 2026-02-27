@@ -194,7 +194,39 @@ func (s *Server) handleEASync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.SavePositionSnapshot(session.AccountID, payload)
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+
+	metrics := risk.DeriveSnapshotMetrics(payload)
+	s.store.SetOpenPositions(session.AccountID, metrics.OpenPositions)
+	s.store.SetDailyLoss(session.AccountID, metrics.DailyLossPct)
+
+	triggeredCircuitBreaker := false
+	if metrics.DailyLossPct >= s.cfg.MaxDailyLossPct && !s.store.IsPaused() {
+		triggeredCircuitBreaker = true
+		s.store.SetPaused(true)
+		s.emitEvent(domain.EventRiskTriggered, session.AccountID, map[string]interface{}{
+			"reason":         "daily_loss_limit_hit_sync",
+			"daily_loss_pct": metrics.DailyLossPct,
+			"threshold_pct":  s.cfg.MaxDailyLossPct,
+			"net_pnl":        metrics.NetPnL,
+			"equity":         metrics.Equity,
+		})
+		s.emitEvent(domain.EventBotPaused, session.AccountID, map[string]interface{}{
+			"paused": true,
+			"source": "risk_circuit_breaker",
+		})
+		_ = s.notifier.Notify(r.Context(), fmt.Sprintf(
+			"Daily loss circuit breaker triggered: %.2f%% >= %.2f%%. Bot paused.",
+			metrics.DailyLossPct,
+			s.cfg.MaxDailyLossPct,
+		))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":                        true,
+		"open_positions":            metrics.OpenPositions,
+		"daily_loss_pct":            metrics.DailyLossPct,
+		"triggered_circuit_breaker": triggeredCircuitBreaker,
+	})
 }
 
 func (s *Server) handleEAExecute(w http.ResponseWriter, r *http.Request) {

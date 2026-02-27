@@ -46,6 +46,12 @@ This repository now includes:
 - `POST /ea/execute`
 - `POST /ea/result`
 
+`/ea/sync` behavior:
+1. Stores raw snapshot payload.
+2. Derives open position count and daily loss % from payload fields.
+3. Updates runtime risk state (`open_positions`, `daily_loss_pct`).
+4. Triggers pause circuit breaker if `daily_loss_pct >= MAX_DAILY_LOSS_PCT`.
+
 ## Safety Rules Enforced
 
 The risk engine blocks new opens when:

@@ -20,6 +20,7 @@ type Store interface {
 	ListEvents(limit int) []domain.Event
 
 	OpenPositions(accountID string) int
+	SetOpenPositions(accountID string, count int)
 	AdjustOpenPositions(accountID string, delta int)
 	DailyLoss(accountID string) float64
 	SetDailyLoss(accountID string, lossPct float64)

@@ -353,6 +353,20 @@ func (s *Store) OpenPositions(accountID string) int {
 	return n
 }
 
+func (s *Store) SetOpenPositions(accountID string, count int) {
+	if count < 0 {
+		count = 0
+	}
+	_, _ = s.db.Exec(
+		`insert into daily_risk_state(account_id, daily_loss_pct, open_positions, paused, updated_at)
+		 values ($1, 0, $2, false, now())
+		 on conflict (account_id) do update
+		 set open_positions = excluded.open_positions,
+		     updated_at = now()`,
+		accountID, count,
+	)
+}
+
 func (s *Store) AdjustOpenPositions(accountID string, delta int) {
 	_, _ = s.db.Exec(
 		`insert into daily_risk_state(account_id, daily_loss_pct, open_positions, paused, updated_at)

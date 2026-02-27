@@ -198,6 +198,15 @@ func (s *Store) OpenPositions(accountID string) int {
 	return s.openPositionsByAccount[accountID]
 }
 
+func (s *Store) SetOpenPositions(accountID string, count int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if count < 0 {
+		count = 0
+	}
+	s.openPositionsByAccount[accountID] = count
+}
+
 func (s *Store) AdjustOpenPositions(accountID string, delta int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
