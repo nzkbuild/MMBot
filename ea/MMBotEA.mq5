@@ -189,7 +189,7 @@ void PollAndExecute()
    }
 
    string cmdId = JsonGetString(resp, "command_id");
-   string cmdType = StringUpper(JsonGetString(resp, "type"));
+   string cmdType = ToUpper(JsonGetString(resp, "type"));
    if(cmdId == "" || cmdType == "" || cmdType == "NOOP")
       return;
 
@@ -282,7 +282,7 @@ bool ExecuteOpen(const string cmdJson, string &ticket, string &errCode, string &
    }
 
    string symbol = JsonGetString(cmdJson, "symbol");
-   string side = StringUpper(JsonGetString(cmdJson, "side"));
+   string side = ToUpper(JsonGetString(cmdJson, "side"));
    double volume = JsonGetDouble(cmdJson, "volume", 0.0);
    double slPips = JsonGetDouble(cmdJson, "sl", 0.0);
    double tpPips = JsonGetDouble(cmdJson, "tp", 0.0);
@@ -669,6 +669,14 @@ double NormalizeVolume(const string symbol, double volume)
 }
 
 //+------------------------------------------------------------------+
+string ToUpper(const string s)
+{
+   string out = s;
+   StringToUpper(out);
+   return out;
+}
+
+//+------------------------------------------------------------------+
 string JsonGetString(const string json, const string key)
 {
    string marker = "\"" + key + "\":";
@@ -692,10 +700,10 @@ string JsonGetString(const string json, const string key)
       {
          i++;
          if(i < StringLen(json))
-            out += CharToString((ushort)StringGetCharacter(json, i));
+            out += StringSubstr(json, i, 1);
          continue;
       }
-      out += CharToString(ch);
+      out += StringSubstr(json, i, 1);
    }
    return "";
 }
@@ -780,7 +788,7 @@ string JsonEscape(const string s)
       else if(ch == '\t')
          out += "\\t";
       else
-         out += CharToString(ch);
+         out += StringSubstr(s, i, 1);
    }
    return out;
 }
@@ -866,4 +874,3 @@ string D(double value)
 {
    return DoubleToString(value, 8);
 }
-
