@@ -21,6 +21,7 @@ import (
 	"mmbot/internal/integrations/telegram"
 	"mmbot/internal/service/oauth"
 	"mmbot/internal/service/risk"
+	"mmbot/internal/service/strategy"
 	storepkg "mmbot/internal/store"
 )
 
@@ -38,6 +39,7 @@ type Server struct {
 	notifier    *telegram.Notifier
 	openClaw    *openclaw.Client
 	openAIOAuth *oauth.OpenAIClient
+	trendEngine *strategy.TrendEngine
 }
 
 func NewServer(
@@ -61,6 +63,7 @@ func NewServer(
 			RedirectURI:  cfg.OpenAIRedirectURI,
 			Scopes:       parseScopes(cfg.OpenAIScopes),
 		},
+		trendEngine: strategy.NewTrendEngine(),
 	}
 }
 
@@ -86,6 +89,7 @@ func (s *Server) Router() http.Handler {
 		protected.Get("/oauth/openai/status", s.handleOpenAIStatus)
 		protected.Post("/oauth/openai/disconnect", s.handleOpenAIDisconnect)
 		protected.Post("/admin/signals/evaluate", s.handleEvaluateSignal)
+		protected.Post("/admin/strategy/evaluate", s.handleTrendEvaluate)
 	})
 
 	r.Group(func(ea chi.Router) {
@@ -305,17 +309,71 @@ func (s *Server) handleEvaluateSignal(w http.ResponseWriter, r *http.Request) {
 	if input.AccountID == "" {
 		input.AccountID = "paper-1"
 	}
+	result := s.evaluateAndQueue(r.Context(), input)
+	writeJSON(w, http.StatusOK, result)
+}
 
+func (s *Server) handleTrendEvaluate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AccountID  string            `json:"account_id"`
+		Symbol     string            `json:"symbol"`
+		SpreadPips float64           `json:"spread_pips"`
+		Candles    []strategy.Candle `json:"candles"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.AccountID == "" {
+		req.AccountID = "paper-1"
+	}
+
+	sig, err := s.trendEngine.Evaluate(strategy.TrendInput{
+		Symbol:     req.Symbol,
+		Candles:    req.Candles,
+		SpreadPips: req.SpreadPips,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !sig.HasSignal {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"has_signal": false,
+			"reason":     sig.Reason,
+		})
+		return
+	}
+
+	input := domain.SignalInput{
+		AccountID:      req.AccountID,
+		Symbol:         req.Symbol,
+		Side:           sig.Side,
+		Confidence:     sig.Confidence,
+		Reason:         sig.Reason,
+		SpreadPips:     req.SpreadPips,
+		StopLossPips:   sig.StopLossPips,
+		TakeProfitPips: sig.TakeProfitPips,
+	}
+	result := s.evaluateAndQueue(r.Context(), input)
+	result["has_signal"] = true
+	result["strategy_signal"] = sig
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) evaluateAndQueue(ctx context.Context, input domain.SignalInput) map[string]interface{} {
 	conn, connected := s.store.GetOpenAIConnection()
-	conn, connected = s.ensureFreshOpenAIConnection(r.Context(), conn, connected)
+	conn, connected = s.ensureFreshOpenAIConnection(ctx, conn, connected)
 	if !connected || conn.ExpiresAt.Before(time.Now().UTC()) {
 		decision := domain.RiskDecision{Allowed: false, DenyReason: "provider_unavailable_fail_closed"}
 		s.emitEvent(domain.EventRiskTriggered, input.AccountID, map[string]interface{}{
 			"reason": decision.DenyReason,
 			"input":  input,
 		})
-		writeJSON(w, http.StatusOK, decision)
-		return
+		return map[string]interface{}{
+			"allowed":     false,
+			"deny_reason": decision.DenyReason,
+		}
 	}
 
 	state := domain.StrategyState{
@@ -331,6 +389,7 @@ func (s *Server) handleEvaluateSignal(w http.ResponseWriter, r *http.Request) {
 		"confidence": input.Confidence,
 		"allowed":    decision.Allowed,
 		"reason":     input.Reason,
+		"source":     "strategy",
 	})
 
 	if !decision.Allowed {
@@ -339,9 +398,11 @@ func (s *Server) handleEvaluateSignal(w http.ResponseWriter, r *http.Request) {
 			"symbol": input.Symbol,
 			"side":   input.Side,
 		})
-		_ = s.notifier.Notify(r.Context(), fmt.Sprintf("Risk trigger: %s (%s %s)", decision.DenyReason, input.Side, input.Symbol))
-		writeJSON(w, http.StatusOK, decision)
-		return
+		_ = s.notifier.Notify(ctx, fmt.Sprintf("Risk trigger: %s (%s %s)", decision.DenyReason, input.Side, input.Symbol))
+		return map[string]interface{}{
+			"allowed":     false,
+			"deny_reason": decision.DenyReason,
+		}
 	}
 
 	cmd := s.store.EnqueueCommand(domain.Command{
@@ -355,11 +416,10 @@ func (s *Server) handleEvaluateSignal(w http.ResponseWriter, r *http.Request) {
 		Reason:    input.Reason,
 		ExpiresAt: time.Now().UTC().Add(30 * time.Second),
 	})
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	return map[string]interface{}{
 		"allowed": decision.Allowed,
 		"command": cmd,
-	})
+	}
 }
 
 func (s *Server) handleDashboardSummary(w http.ResponseWriter, r *http.Request) {

@@ -38,6 +38,7 @@ This repository now includes:
 - `GET /oauth/openai/status`
 - `POST /oauth/openai/disconnect`
 - `POST /admin/signals/evaluate`
+- `POST /admin/strategy/evaluate`
 
 ### EA auth required
 - `POST /ea/heartbeat`
@@ -92,7 +93,7 @@ go run ./cmd/server
 1. `POST /admin/login` to get admin JWT.
 2. `GET /oauth/openai/start`, then call `/oauth/openai/callback` with `state` + `code`.
 3. `POST /ea/register` using connect code.
-4. `POST /admin/signals/evaluate` with signal payload.
+4. `POST /admin/strategy/evaluate` with M15 candles payload.
 5. EA polls `/ea/execute`, performs action, posts `/ea/result`.
 6. Check `/dashboard/summary` and `/events`.
 
@@ -103,3 +104,29 @@ go run ./cmd/server
 3. In Postgres mode, provider tokens are encrypted at rest with `OAUTH_ENCRYPTION_KEY`.
 4. Set `STORE_MODE=postgres` + valid `DATABASE_URL` to use persistent runtime state.
 5. Default mode is paper/sim semantics.
+
+## Strategy Endpoint Payload
+
+`POST /admin/strategy/evaluate`
+
+```json
+{
+  "account_id": "paper-1",
+  "symbol": "EURUSD",
+  "spread_pips": 1.2,
+  "candles": [
+    {
+      "time": "2026-02-27T14:00:00Z",
+      "open": 1.0821,
+      "high": 1.0829,
+      "low": 1.0817,
+      "close": 1.0826
+    }
+  ]
+}
+```
+
+Expected behavior:
+1. Trend engine evaluates EMA20/EMA50 + ATR from provided candles.
+2. If no trend setup, returns `has_signal=false`.
+3. If setup exists, risk/AI gate runs and command is queued for EA polling.
