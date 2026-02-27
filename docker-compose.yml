@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: mmbot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mmbot
+      POSTGRES_PASSWORD: mmbot
+      POSTGRES_DB: mmbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - mmbot_pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+
+volumes:
+  mmbot_pgdata:
+

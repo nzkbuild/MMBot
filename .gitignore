@@ -1,0 +1,7 @@
+.env
+bin/
+dist/
+*.exe
+*.log
+.cache/
+antigravity-optimizer/
