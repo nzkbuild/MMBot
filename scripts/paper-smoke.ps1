@@ -5,6 +5,9 @@ param(
   [string]$ConnectCode = "MMBOT-ONE-TIME-CODE",
   [string]$AccountId = "paper-1",
   [string]$DeviceId = "smoke-device-1",
+  [bool]$QueueSignal = $false,
+  [string]$SignalSymbol = "XAUUSD",
+  [double]$SignalSpreadPips = 1.0,
   [string]$TelegramWebhookSecret = "",
   [string]$TelegramChatId = ""
 )
@@ -32,6 +35,29 @@ function Invoke-JsonGet {
   $headers = @{}
   if ($Bearer -ne "") { $headers["Authorization"] = "Bearer $Bearer" }
   return Invoke-RestMethod -Method Get -Uri $Url -Headers $headers
+}
+
+function Build-UptrendCandles {
+  param([int]$Count = 120)
+  $candles = @()
+  $basePrice = 1.0800
+  $start = [DateTimeOffset]::FromUnixTimeSeconds(1700000000).UtcDateTime
+  for ($i = 0; $i -lt $Count; $i++) {
+    $step = $i * 0.00065
+    $close = $basePrice + $step
+    if (($i % 9) -eq 0) { $close -= 0.0002 }
+    $open = $close - 0.0002
+    $high = $close + 0.0008
+    $low = $close - 0.0010
+    $candles += @{
+      time  = $start.AddMinutes(15 * $i).ToString("yyyy-MM-ddTHH:mm:ssZ")
+      open  = [double]$open
+      high  = [double]$high
+      low   = [double]$low
+      close = [double]$close
+    }
+  }
+  return $candles
 }
 
 Write-Host "[1/9] health check"
@@ -79,6 +105,21 @@ Write-Host "[6/9] execute poll (likely NOOP unless command queued)"
 $exec = Invoke-JsonPost -Url "$BaseUrl/ea/execute" -Body @{} -Bearer $eaToken
 Write-Host "  execute type=$($exec.type)"
 
+if ($QueueSignal) {
+  Write-Host "[6b] queue test strategy signal"
+  $candles = Build-UptrendCandles -Count 120
+  $signalResp = Invoke-JsonPost -Url "$BaseUrl/admin/strategy/evaluate" -Bearer $adminToken -Body @{
+    account_id  = $AccountId
+    symbol      = $SignalSymbol
+    spread_pips = $SignalSpreadPips
+    candles     = $candles
+  }
+  Write-Host "  allowed=$($signalResp.allowed) deny_reason=$($signalResp.deny_reason)"
+  if ($signalResp.command) {
+    Write-Host "  queued command_id=$($signalResp.command.command_id) type=$($signalResp.command.type)"
+  }
+}
+
 Write-Host "[7/9] /today via telegram webhook (optional)"
 if ($TelegramChatId -ne "") {
   $extra = @{}
@@ -107,4 +148,3 @@ $events = Invoke-JsonGet -Url "$BaseUrl/events?limit=10" -Bearer $adminToken
 Write-Host "  count=$($events.count)"
 
 Write-Host "Paper smoke check completed."
-
