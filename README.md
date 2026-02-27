@@ -98,6 +98,9 @@ The migration SQL is mounted to `docker-entrypoint-initdb.d` and auto-applies on
 go run ./cmd/server
 ```
 
+Paper-mode validation runbook:
+- [PAPER_MODE_RUNBOOK.md](C:/Users/nbzkr/OneDrive/Documents/Coding/MMBot/docs/PAPER_MODE_RUNBOOK.md)
+
 ## MT5 EA (Real Loop)
 
 Compile and attach:
